@@ -40,13 +40,13 @@
     },
     '2020': {
       scope: '<strong>2020 • Prefeitura de Manaus</strong>2º turno • bairros de Manaus',
-      notice: 'Campanha municipal • segundo turno. O mapa abaixo carrega os bairros oficiais de Manaus e colore cada bairro pelos indicadores da sua Zona Eleitoral correspondente.',
-      source: 'Fontes: TSE — totalização oficial do 2º turno de Manaus em 2020; geometria de bairros: SEMEF/IPAAM.'
+      notice: 'Campanha municipal • segundo turno. O mapa usa a configuração histórica de 63 bairros de Manaus, com cores pelas 6 zonas urbanas; os indicadores eleitorais continuam vinculados à Zona Eleitoral correspondente.',
+      source: 'Fontes: TSE — totalização oficial do 2º turno de Manaus em 2020; geometria histórica de 63 bairros: Prefeitura Municipal de Manaus/SEMEF (base de 2021 preservada pela Digital Guard); zonas urbanas: IMPLURB — Divisão da Área Urbana e Transição da Cidade de Manaus.'
     },
     '2024': {
       scope: '<strong>2024 • Prefeitura de Manaus</strong>2º turno • bairros de Manaus',
-      notice: 'Campanha municipal • segundo turno. O mapa abaixo carrega os bairros oficiais de Manaus e aplica os dados oficiais do 2º turno de 2024 por Zona Eleitoral.',
-      source: 'Fontes: Tribunal Superior Eleitoral (TSE) — 2º turno de Manaus em 2024; geometria de bairros: SEMEF/IPAAM.'
+      notice: 'Campanha municipal • segundo turno. O mapa usa a configuração histórica de 63 bairros de Manaus, com cores pelas 6 zonas urbanas; os dados oficiais do 2º turno de 2024 permanecem associados à Zona Eleitoral.',
+      source: 'Fontes: Tribunal Superior Eleitoral (TSE) — 2º turno de Manaus em 2024; geometria histórica de 63 bairros: Prefeitura Municipal de Manaus/SEMEF (base de 2021 preservada pela Digital Guard); zonas urbanas: IMPLURB — Divisão da Área Urbana e Transição da Cidade de Manaus.'
     },
     '2026': {
       scope: '<strong>2026 • Amazonas</strong>2.801.182 eleitores • 62 municípios',
@@ -114,6 +114,40 @@
       .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
       .replace(/[^a-z0-9]+/g,' ')
       .trim();
+  }
+
+
+  // Associação bairro → zona conforme a divisão urbana oficial do IMPLURB (mapa censitário 2022, publicado em 2024).
+  // A referência complementar fornecida pelo usuário diverge em seis bairros; aqui prevalece a base oficial.
+  const MANAUS_ZONE_GROUPS = {
+    'Zona Norte': ['Colônia Santo Antônio','Novo Israel','Colônia Terra Nova','Santa Etelvina','Monte das Oliveiras','Cidade Nova','Novo Aleixo','Cidade de Deus','Nova Cidade','Lago Azul'],
+    'Zona Sul': ['Centro','Nossa Senhora Aparecida','Presidente Vargas','Praça 14 de Janeiro','Cachoeirinha','Raiz','São Francisco','Petrópolis','Japiim','Educandos','Santa Luzia','Morro da Liberdade','Betânia','Colônia Oliveira Machado','São Lázaro','Crespo','Vila Buriti','Distrito Industrial I'],
+    'Zona Leste': ['Coroado','Distrito Industrial II','Mauazinho','Colônia Antônio Aleixo','Puraquequara','Armando Mendes','Zumbi dos Palmares','São José Operário','Tancredo Neves','Jorge Teixeira','Gilberto Mestrinho'],
+    'Zona Oeste': ['Compensa','Ponta Negra','Tarumã-Açu','Tarumã','São Raimundo','Santo Antônio','Santo Agostinho','Glória'],
+    'Zona Centro-Sul': ['Adrianópolis','Parque 10 de Novembro','Nossa Senhora das Graças','Flores','Aleixo'],
+    'Zona Centro-Oeste': ['Alvorada','Lírio do Vale','Da Paz','Chapada','Dom Pedro I','Planalto','Nova Esperança','São Geraldo','Redenção','São Jorge','Vila da Prata']
+  };
+
+  const MANAUS_ZONE_COLORS = {
+    'Zona Norte': '#e6d54f',
+    'Zona Sul': '#ef6b5d',
+    'Zona Leste': '#4f70e8',
+    'Zona Oeste': '#55b9d8',
+    'Zona Centro-Sul': '#e8a13d',
+    'Zona Centro-Oeste': '#48c987'
+  };
+
+  const MANAUS_ALLOWED_ZONES = Object.keys(MANAUS_ZONE_GROUPS);
+  const MANAUS_EXPECTED_NAMES = MANAUS_ALLOWED_ZONES.flatMap(zone => MANAUS_ZONE_GROUPS[zone]);
+  const urbanZoneByBairro = new Map();
+  MANAUS_ALLOWED_ZONES.forEach(zone => MANAUS_ZONE_GROUPS[zone].forEach(name => urbanZoneByBairro.set(normalize(name), zone)));
+
+  function urbanZoneForBairro(name){
+    return urbanZoneByBairro.get(normalize(name)) || null;
+  }
+
+  function neighborhoodId(name){
+    return 'bairro-' + normalize(name).replace(/\s+/g,'-');
   }
 
   const aliases = {
@@ -196,7 +230,11 @@
     e.onpointerleave=()=>dom.tip.style.display='none';
   });
 
-  const GEO_URL = 'https://gis.ipaam.am.gov.br/server/rest/services/01_Publicacoes_MPF/bairros_manaus_semef/MapServer/0/query?where=1%3D1&outFields=nome&returnGeometry=true&f=geojson';
+  // A página compara campanhas de 2020/2024, portanto usa a configuração histórica de 63 bairros.
+  // A malha abaixo é um recorte GeoJSON de uma base municipal de 2021 preservada pela Digital Guard.
+  const MANAUS_GEO_SOURCES = [
+    'https://raw.githubusercontent.com/digital-guard/preservCutGeo-BR2021/main/data/AM/Manaus/_pk0071.01/nsvia/pols_6xm.geojson'
+  ];
 
   function projectManaus(geo){
     const features = geo.features || [];
@@ -205,8 +243,11 @@
     const xs=allPts.map(p=>p[0]), ys=allPts.map(p=>p[1]);
     const x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
     const pad=16, W=900, H=720;
-    const scale=Math.min((W-2*pad)/(x1-x0),(H-2*pad)/(y1-y0));
-    const proj = p => [pad+(p[0]-x0)*scale, H-pad-(p[1]-y0)*scale];
+    const innerW=W-2*pad, innerH=H-2*pad;
+    const scale=Math.min(innerW/(x1-x0),innerH/(y1-y0));
+    const renderW=(x1-x0)*scale, renderH=(y1-y0)*scale;
+    const offsetX=pad+(innerW-renderW)/2, offsetY=pad+(innerH-renderH)/2;
+    const proj = p => [offsetX+(p[0]-x0)*scale, offsetY+renderH-(p[1]-y0)*scale];
     const ring = r => r.map((p,i)=>{ const q=proj(p); return (i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1); }).join('')+'Z';
     const geomPath = geom => {
       if(geom.type === 'Polygon') return geom.coordinates.map(ring).join('');
@@ -222,38 +263,90 @@
     if(geom.type === 'MultiPolygon') geom.coordinates.forEach(poly=>poly.forEach(r=>r.forEach(p=>out.push(p))));
   }
 
+  function validateManausGeoJSON(geo){
+    if(!geo || geo.type !== 'FeatureCollection' || !Array.isArray(geo.features)) throw new Error('GeoJSON de Manaus inválido: FeatureCollection ausente.');
+    if(geo.features.length !== 63) throw new Error(`GeoJSON de Manaus inválido: esperado 63 bairros, recebido ${geo.features.length}.`);
+
+    const expected = new Set(MANAUS_EXPECTED_NAMES.map(normalize));
+    const seenNames = new Set();
+    const seenGeometry = new Map();
+    const zones = new Set();
+    let multiPolygons = 0;
+
+    const features = geo.features.map((f, idx) => {
+      const props = f.properties || {};
+      const rawName = props.nsvia || props.NOME_BAIRR || props.nome || props.NOME || props.name || '';
+      const name = String(rawName).trim();
+      const key = normalize(name);
+      if(!name) throw new Error(`Bairro sem nome na feature ${idx+1}.`);
+      if(seenNames.has(key)) throw new Error(`Bairro duplicado no GeoJSON: ${name}.`);
+      if(!expected.has(key)) throw new Error(`Bairro inesperado no GeoJSON: ${name}.`);
+      seenNames.add(key);
+
+      const urbanZone = urbanZoneForBairro(name);
+      if(!urbanZone || !MANAUS_ALLOWED_ZONES.includes(urbanZone)) throw new Error(`Zona urbana ausente ou inválida para ${name}.`);
+      zones.add(urbanZone);
+
+      if(!f.geometry || !['Polygon','MultiPolygon'].includes(f.geometry.type) || !Array.isArray(f.geometry.coordinates) || !f.geometry.coordinates.length){
+        throw new Error(`Geometria ausente ou inválida para ${name}.`);
+      }
+      if(f.geometry.type === 'MultiPolygon') multiPolygons += 1;
+      const geometryKey = JSON.stringify(f.geometry);
+      if(seenGeometry.has(geometryKey)) throw new Error(`Geometria duplicada entre ${seenGeometry.get(geometryKey)} e ${name}.`);
+      seenGeometry.set(geometryKey, name);
+
+      return { ...f, properties:{ ...props, name, urbanZone } };
+    });
+
+    const missing = [...expected].filter(key => !seenNames.has(key));
+    if(missing.length) throw new Error(`Bairros esperados ausentes no GeoJSON: ${missing.join(', ')}.`);
+    if(zones.size !== 6) throw new Error(`Total de zonas inválido: esperado 6, recebido ${zones.size}.`);
+
+    const summary = { bairros:features.length, nomesUnicos:seenNames.size, zonas:zones.size, multiPolygons };
+    console.info('[Mapa Manaus] Total de bairros:', features.length);
+    console.info('[Mapa Manaus] Total de zonas:', zones.size);
+    console.info('[Mapa Manaus] validação concluída', summary);
+    return { ...geo, features };
+  }
+
   async function ensureManaus(){
     if(manausLoaded || manausError) return;
-    try {
-      const res = await fetch(GEO_URL, { mode:'cors' });
-      if(!res.ok) throw new Error('Falha ao carregar bairros de Manaus');
-      const geo = await res.json();
-      buildManausFromGeoJSON(geo);
-      manausLoaded = true;
-    } catch(err){
-      manausError = err;
-      console.error(err);
+    const failures=[];
+    for(const url of MANAUS_GEO_SOURCES){
+      try {
+        const res = await fetch(url, url.startsWith('http') ? { mode:'cors' } : undefined);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const geo = validateManausGeoJSON(await res.json());
+        buildManausFromGeoJSON(geo);
+        manausLoaded = true;
+        console.info('[Mapa Manaus] fonte geográfica carregada:', url);
+        return;
+      } catch(err){
+        failures.push(`${url}: ${err.message || err}`);
+      }
     }
+    manausError = new Error('Não foi possível carregar uma base válida de 63 bairros de Manaus. ' + failures.join(' | '));
+    console.error(manausError);
   }
 
   function buildManausFromGeoJSON(geo){
     gManaus.innerHTML = '';
+    manausLookup2020 = new Map();
+    manausLookup2024 = new Map();
     const { features, geomPath } = projectManaus(geo);
 
-    const outline = document.createElementNS(SVG_NS,'g');
-    outline.setAttribute('opacity', '0.25');
-    gManaus.appendChild(outline);
-
-    manausRows = features.map((f, idx) => {
-      const name = (f.properties && (f.properties.nome || f.properties.NOME || f.properties.name)) || `Bairro ${idx+1}`;
-      const zone = zoneForBairro(name);
-      const d20 = zone ? Z2020[zone] : null;
-      const d24 = zone ? Z2024[zone] : null;
+    manausRows = features.map(f => {
+      const name = f.properties.name;
+      const urbanZone = f.properties.urbanZone;
+      const electoralZone = zoneForBairro(name);
+      const d20 = electoralZone ? Z2020[electoralZone] : null;
+      const d24 = electoralZone ? Z2024[electoralZone] : null;
       const base = {
-        id: `bairro-${idx}`,
+        id: neighborhoodId(name),
         name,
-        zone,
-        profile: zone ? (profileByZone.get(zone) || '') : 'Zona não mapeada'
+        urbanZone,
+        electoralZone,
+        profile: electoralZone ? (profileByZone.get(electoralZone) || '') : 'Zona eleitoral não mapeada'
       };
       const row20 = { ...base, year:'2020', aptos: d20?.aptos || null, validos: d20?.validos || null, david: d20?.david || null, opponent: d20?.opponent || null, opponentName: d20?.opponentName || '—', winner: d20?.winner || '—', share: d20?.share || null, opponentShare: d20?.opponentShare || null, diff: d20?.diff || null };
       const row24 = { ...base, year:'2024', aptos: d24?.aptos || null, validos: d24?.validos || null, david: d24?.david || null, opponent: d24?.opponent || null, opponentName: d24?.opponentName || '—', winner: d24?.winner || '—', share: d24?.share || null, opponentShare: d24?.opponentShare || null, diff: d24?.diff || null };
@@ -263,7 +356,9 @@
       const p = document.createElementNS(SVG_NS,'path');
       p.setAttribute('d', geomPath(f.geometry));
       p.setAttribute('class','municipality manaus-bairro');
+      p.setAttribute('fill-rule','evenodd');
       p.dataset.id = base.id;
+      p.dataset.zone = urbanZone;
       gManaus.appendChild(p);
 
       p.onclick = () => select(year==='2020' ? manausLookup2020.get(base.id) : manausLookup2024.get(base.id));
@@ -312,8 +407,9 @@
     const share = d.share == null ? '—' : pct(d.share);
     const oppShare = d.opponentShare == null ? '—' : pct(d.opponentShare);
     const diff = d.diff == null ? '—' : fmt.format(d.diff);
-    const zone = d.zone ? `${d.zone}ª Zona Eleitoral` : 'Zona não identificada';
-    dom.detail.innerHTML = `<div class="eyebrow">${year} • campanha municipal</div><h3>${d.name}</h3><p class="sub">${zone} • ${d.profile || ''}</p><div class="metrics"><div class="metric"><span>Votos válidos</span><strong>${val}</strong></div><div class="metric"><span>David Almeida</span><strong>${david}</strong><small>${share}</small></div><div class="metric"><span>${d.opponentName || 'Adversário'}</span><strong>${opp}</strong><small>${oppShare}</small></div><div class="metric"><span>Vencedor</span><strong>${d.winner || '—'}</strong></div><div class="metric"><span>Diferença</span><strong>${diff}</strong></div></div><p class="story-note">Indicadores herdados da Zona Eleitoral correspondente ao bairro.</p>`;
+    const electoralZone = d.electoralZone ? `${d.electoralZone}ª Zona Eleitoral` : 'Zona eleitoral não identificada';
+    const urbanZone = d.urbanZone || 'Zona urbana não identificada';
+    dom.detail.innerHTML = `<div class="eyebrow">${year} • campanha municipal</div><h3>${d.name}</h3><p class="sub">${urbanZone} • ${electoralZone} • ${d.profile || ''}</p><div class="metrics"><div class="metric"><span>Votos válidos</span><strong>${val}</strong></div><div class="metric"><span>David Almeida</span><strong>${david}</strong><small>${share}</small></div><div class="metric"><span>${d.opponentName || 'Adversário'}</span><strong>${opp}</strong><small>${oppShare}</small></div><div class="metric"><span>Vencedor</span><strong>${d.winner || '—'}</strong></div><div class="metric"><span>Diferença</span><strong>${diff}</strong></div></div><p class="story-note">Indicadores herdados da Zona Eleitoral correspondente ao bairro.</p>`;
   }
 
   function showTip(e,d){
@@ -323,7 +419,7 @@
     } else if(year==='2026'){
       dom.tip.innerHTML = `<b>${d.name}</b><div class="tipgrid"><span>Eleitores 2026</span><strong>${fmt.format(d.aptos)}</strong><span>% do estado</span><strong>${pct(d.share)}</strong></div>`;
     } else {
-      dom.tip.innerHTML = `<b>${d.name}</b><div class="tipgrid"><span>Zona</span><strong>${d.zone ? d.zone+'ª ZE' : '—'}</strong><span>David</span><strong>${d.david == null ? '—' : fmt.format(d.david)}${d.share == null ? '' : ' · ' + pct(d.share)}</strong><span>${d.opponentName}</span><strong>${d.opponent == null ? '—' : fmt.format(d.opponent)}${d.opponentShare == null ? '' : ' · ' + pct(d.opponentShare)}</strong></div>`;
+      dom.tip.innerHTML = `<b>${d.name}</b><div class="tipgrid"><span>Zona urbana</span><strong>${d.urbanZone || '—'}</strong><span>Zona eleitoral</span><strong>${d.electoralZone ? d.electoralZone+'ª ZE' : '—'}</strong><span>David</span><strong>${d.david == null ? '—' : fmt.format(d.david)}${d.share == null ? '' : ' · ' + pct(d.share)}</strong><span>${d.opponentName}</span><strong>${d.opponent == null ? '—' : fmt.format(d.opponent)}${d.opponentShare == null ? '' : ' · ' + pct(d.opponentShare)}</strong></div>`;
     }
     const b = document.querySelector('#map').getBoundingClientRect();
     dom.tip.style.display='block';
@@ -335,7 +431,7 @@
     if(year==='2018') return A.municipios.filter(d=>d.name.toLowerCase().includes(query));
     if(year==='2026') return E2026.filter(d=>d.name.toLowerCase().includes(query)).sort((a,b)=>b.aptos-a.aptos);
     const list = year==='2020' ? Array.from(manausLookup2020.values()) : Array.from(manausLookup2024.values());
-    return list.filter(d => d.name.toLowerCase().includes(query) || String(d.zone || '').includes(query.replace(/\D/g,''))).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+    return list.filter(d => normalize(d.name).includes(normalize(query)) || normalize(d.urbanZone || '').includes(normalize(query)) || String(d.electoralZone || '').includes(query.replace(/\D/g,''))).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
   }
 
   function table(rows){
@@ -347,8 +443,8 @@
       head.innerHTML = '<th>Município</th><th class="num">Eleitores 2026</th><th class="num">% do estado</th><th class="num">Ranking</th>';
       document.querySelector('#tbody').innerHTML = rows.map(d=>`<tr data-id="${d.code}"><td>${d.name}</td><td class="num">${fmt.format(d.aptos)}</td><td class="num">${pct(d.share)}</td><td class="num">${d.rank}º</td></tr>`).join('');
     } else {
-      head.innerHTML = '<th>Bairro</th><th class="num">ZE</th><th class="num">David</th><th class="num">Adversário</th><th class="num">% David</th>';
-      document.querySelector('#tbody').innerHTML = rows.map(d=>`<tr data-id="${d.id}"><td>${d.name}</td><td class="num">${d.zone ? d.zone+'ª' : '—'}</td><td class="num">${d.david == null ? '—' : fmt.format(d.david)}</td><td class="num">${d.opponent == null ? '—' : fmt.format(d.opponent)}</td><td class="num">${d.share == null ? '—' : pct(d.share)}</td></tr>`).join('');
+      head.innerHTML = '<th>Bairro</th><th>Zona urbana</th><th class="num">ZE</th><th class="num">David</th><th class="num">Adversário</th><th class="num">% David</th>';
+      document.querySelector('#tbody').innerHTML = rows.map(d=>`<tr data-id="${d.id}"><td>${d.name}</td><td>${d.urbanZone || '—'}</td><td class="num">${d.electoralZone ? d.electoralZone+'ª' : '—'}</td><td class="num">${d.david == null ? '—' : fmt.format(d.david)}</td><td class="num">${d.opponent == null ? '—' : fmt.format(d.opponent)}</td><td class="num">${d.share == null ? '—' : pct(d.share)}</td></tr>`).join('');
     }
     document.querySelectorAll('#tbody tr[data-id]').forEach(r=>r.onclick=()=>{
       const id = r.dataset.id;
@@ -402,22 +498,29 @@
   function renderManausMap(rows){
     gAmazonas.style.display = 'none';
     gManaus.style.display = '';
-    const all = year==='2020' ? Array.from(manausLookup2020.values()) : Array.from(manausLookup2024.values());
-    const shares = all.map(d=>d.share).filter(v=>v != null);
-    const mn = Math.min(...shares), mx = Math.max(...shares);
     const visible = new Set(rows.map(d=>d.id));
     document.querySelectorAll('.manaus-bairro').forEach(el=>{
       const d = year==='2020' ? manausLookup2020.get(el.dataset.id) : manausLookup2024.get(el.dataset.id);
       const ok = visible.has(el.dataset.id);
-      const unknown = d && d.share == null;
       el.classList.toggle('dim', !ok);
       el.style.display = '';
-      el.style.fill = !ok ? '#183028' : unknown ? 'rgba(106,126,117,.6)' : color((d.share-mn)/(mx-mn||1));
+      el.style.fill = !ok ? '#183028' : (MANAUS_ZONE_COLORS[d?.urbanZone] || '#6a7e75');
     });
   }
 
+  function renderLegend(is18,is26,isMunicipal){
+    const legend = document.querySelector('#legend');
+    if(isMunicipal){
+      legend.classList.add('zone-legend');
+      legend.innerHTML = MANAUS_ALLOWED_ZONES.map(zone => `<span class="zone-legend-item"><i style="background:${MANAUS_ZONE_COLORS[zone]}"></i>${zone.replace('Zona ','')}</span>`).join('');
+      return;
+    }
+    legend.classList.remove('zone-legend');
+    legend.innerHTML = `<span>${is26?'menor eleitorado':'menor valor'}</span><i class="gradient"></i><span>${is26?'maior eleitorado':'maior valor'}</span>`;
+  }
+
   function story2020(){
-    return `<div class="story-grid"><article class="panel story-card"><div class="story-kicker">2020 • 2º turno</div><h2>Vitória em Manaus</h2><p>David Almeida venceu Amazonino Mendes e conquistou a Prefeitura de Manaus.</p><div class="result-list"><div class="result-row primary"><span>David Almeida • Avante</span><b>466.970</b><em>51,27%</em></div><div class="result-row"><span>Amazonino Mendes • Podemos</span><b>443.747</b><em>48,73%</em></div></div><div class="story-metrics"><div class="story-metric"><span>Diferença</span><strong>23.223 votos</strong></div><div class="story-metric"><span>Abstenções</span><strong>298.712</strong></div><div class="story-metric"><span>Brancos + nulos</span><strong>122.184</strong></div></div></article><article class="panel story-card"><div class="story-kicker">Mapa oficial de bairros</div><h2>Campanha municipal em Manaus</h2><p>Nesta versão, o mapa da campanha municipal passou a usar a malha oficial dos bairros de Manaus, em vez do mapa do Amazonas.</p></article></div>`;
+    return `<div class="story-grid"><article class="panel story-card"><div class="story-kicker">2020 • 2º turno</div><h2>Vitória em Manaus</h2><p>David Almeida venceu Amazonino Mendes e conquistou a Prefeitura de Manaus.</p><div class="result-list"><div class="result-row primary"><span>David Almeida • Avante</span><b>466.970</b><em>51,27%</em></div><div class="result-row"><span>Amazonino Mendes • Podemos</span><b>443.747</b><em>48,73%</em></div></div><div class="story-metrics"><div class="story-metric"><span>Diferença</span><strong>23.223 votos</strong></div><div class="story-metric"><span>Abstenções</span><strong>298.712</strong></div><div class="story-metric"><span>Brancos + nulos</span><strong>122.184</strong></div></div></article><article class="panel story-card"><div class="story-kicker">Cartografia histórica oficial</div><h2>63 bairros • 6 zonas urbanas</h2><p>O mapa municipal usa a configuração territorial vigente nas campanhas de 2020 e 2024: cada bairro permanece uma feature independente, com cor determinada pela sua zona urbana.</p></article></div>`;
   }
 
   function story2026(){
@@ -444,26 +547,28 @@
     const isMunicipal = year==='2020' || year==='2024';
 
     document.querySelector('#metricField').classList.toggle('hidden', !is18);
-    document.querySelector('#search').placeholder = isMunicipal ? 'Buscar bairro ou zona' : 'Buscar município';
+    document.querySelector('#search').placeholder = isMunicipal ? 'Buscar bairro, zona urbana ou ZE' : 'Buscar município';
     document.querySelector('#visualTitle').textContent = is18 ? 'Mapa municipal — 2018' : is26 ? 'Mapa do eleitorado municipal — 2026' : `Mapa de Manaus por bairros — ${year}`;
-    document.querySelector('#visualSub').textContent = is18 ? 'Clique em um município para visualizar seus dados' : is26 ? 'Eleitores aptos por município • clique para ver o quantitativo exato' : 'Bairros oficiais de Manaus • campanha municipal';
+    document.querySelector('#visualSub').textContent = is18 ? 'Clique em um município para visualizar seus dados' : is26 ? 'Eleitores aptos por município • clique para ver o quantitativo exato' : '63 bairros históricos • 6 zonas urbanas • clique para identificar o bairro';
+    dom.svg.setAttribute('aria-label', isMunicipal ? 'Mapa dos 63 bairros históricos de Manaus agrupados em 6 zonas urbanas' : 'Mapa dos municípios do Amazonas');
     document.querySelector('#tableTitle').textContent = isMunicipal ? 'Bairros de Manaus' : is26 ? 'Eleitorado por município' : 'Municípios';
     document.querySelector('#zonegrid').style.display = 'none';
     document.querySelector('#map').classList.remove('hidden');
     document.querySelector('#legend').classList.remove('hidden');
-    const legendSpans = document.querySelectorAll('#legend span');
-    if(legendSpans.length===2){
-      legendSpans[0].textContent = is26 ? 'menor eleitorado' : is18 ? 'menor valor' : 'menor % David';
-      legendSpans[1].textContent = is26 ? 'maior eleitorado' : is18 ? 'maior valor' : 'maior % David';
-    }
+    renderLegend(is18,is26,isMunicipal);
 
     if(isMunicipal){
+      // Troca o mapa imediatamente ao entrar em 2020/2024. Isso evita que o
+      // mapa do Amazonas permaneça visível enquanto a malha de Manaus carrega
+      // ou caso a fonte geográfica esteja temporariamente indisponível.
+      gAmazonas.style.display = 'none';
+      gManaus.style.display = '';
       if(!manausLoaded && !manausError){
-        document.querySelector('#tbody').innerHTML = '<tr><td colspan="5">Carregando bairros oficiais de Manaus...</td></tr>';
+        document.querySelector('#tbody').innerHTML = '<tr><td colspan="6">Carregando os 63 bairros de Manaus...</td></tr>';
         await ensureManaus();
       }
       if(manausError){
-        document.querySelector('#tbody').innerHTML = '<tr><td colspan="5">Não foi possível carregar a malha oficial dos bairros de Manaus. Verifique a conexão.</td></tr>';
+        document.querySelector('#tbody').innerHTML = '<tr><td colspan="6">Não foi possível carregar e validar a malha de 63 bairros de Manaus. Verifique a conexão.</td></tr>';
         renderDetail(null);
         return;
       }
